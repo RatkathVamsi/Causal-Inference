@@ -1,0 +1,645 @@
+---
+title: "PUBH 7485 Final Project"
+author: "Sri Krishna Vamsi Koneru"
+date: "2024-12-09"
+output: html_document
+---
+
+```{r echo=FALSE,results='hide'}
+data<-read.csv("C:/UMN/fall2024/Causal Inference/project/HMS_2022-2023_PUBLIC_instchars (1).csv",header=TRUE)
+```
+
+## Effect of being an international student on Flourishing in College going students
+
+**Abstract**  
+Flourishing, a measure of psychological wellbeing and prosperity, is a vital indicator of mental health among college students. This study investigates the impact of being an international student on flourishing using data from the Healthy Minds Study (HMS), an annual survey conducted among U.S. college students. The analysis incorporates various demographic, financial, and lifestyle factors to estimate the Average Treatment Effect (ATE) of international student status on flourishing. The study also addresses challenges with missing data, applying imputation techniques and adjusting the dataset to ensure robust statistical analysis. Findings from this research aim to contribute to a better understanding of mental wellbeing in diverse student populations and inform targeted interventions to support international students in higher education.
+
+**Background**  
+
+Mental wellbeing in college students is something that can be influenced by a lot of factors and is an essential area of study because this can shape the future of a student and is something that should be given prominence. In this study, I want to observe the effect on flourishing, which is a scale that is used to measure the psychological well being along with the major aspects of prosperity[Diener, 2009; Ryff & Keyes, 1995]. The dataset considered was the Healthy Minds Study. This is the responses to a student survey that was sent to Universities across US, where the recipients were chosen based on randomization. However, some modules were not provided to all the universities and hence the factors implementing the flourishing were limited by this. The survey was hosted on Qualtrics and took approximately 25 minutes to complete. The HMS survey is one of the only annual surveys that focuses on mental health in college and university populations. The covariates were chosen based on how they affect the flourishing[Wielemaker, 2022] and included in the analyses. 
+
+**Methods**
+
+The outcome of interest as discussed above is the Flourishing while the dependent variable that I chose to focus on is the international variable, representing whether the respondent was an international student or not. Imputation was done on all the covariates chosen. Some covariates were dropped due to huge missing values which could have been caused by the unavailability of the modules to all the universities and thus the students who responded. While imputation was also tried on those variables, it resulted in huge skewing and the models could not handle this. Also, in some cases, multiple binary columns were merged to represent a single categorical variable with different factors. The estimate of interest is the Average Treatment Effect(ATE). The covariates considered were age,sex at birth, race, gender identity, whether the student is an international student, current financial situation, past financial situation, situation of residence, sense of belonging, whether a student is lonely, the hours of sleep a student gets in the weekdays, hours of sleep in weekends, how active they are{whether they participate in any activites on campus}, their current grade and flourish , depicting flourishing. Except the final variable, all are self reported and flourish is calculated  based on different questions answered by the students. Only age and flourish are quantitative variables considered in this study. Bootstrapping was performed in the analysis to estimate the Confidence Intervals of the ATE. 
+
+**Statistical Analysis**
+
+The balance of the covariates across the international variable can be seen in the table below{TABLE1}. Now, even though the SMD seems a bit higher, this can be fixed later by weighting. However, no more variables can be dropped because of their subjective significance according to theories mentioned in the papers referenced. I proceeded to apply the methods of point exposure taught in this course in my study. Hence, first I just found the ATE without any adjustment , the ATE was -0.08[-0.313,0.152]. Then regression adjustment was done and the ATE estimated using this model is -0.0823[-0.405,0.24]. Now, I was curious what the effect of propensity scoring would be and decided to fit a Propensity Score Regression model where instead of outcome the adjustment is done based on the propensity score calculated. The ATE through this method was 0.044[-0.389,0.477]. Then stratification was done using this propensity scores and the ATE estimated through Propensity Score Stratification was 0.0379[-0.374,0.45]. To verify these observations that there is no significant effect based on the ATE [since the CIs include zero in all models]{TABLE 3}, Sensitivity Analysis was done using Inverse Probability Weighting. The weighted balance of the covariates between the groups can be seen in the table{TABLE 2}. A plot of SMD was constructed to show how it has changed due to weighting. This change is expected due to the heavy skewedness of the international variable. Now, IPW1 and IPW2 are calculated using the model after Inverse Probability Weighting and the ATE estimated using IPW1 is 6.75[4.94,8,57], while the ATE using IPW2 is -0.315[-0.831,0.2].
+
+
+
+```{r warning=FALSE,echo=FALSE,message=FALSE}
+library(tableone)
+library(dplyr)
+library(purrr)
+library(knitr)
+library(survey)
+library(forestplot)
+
+```
+
+```{r warning=FALSE,echo=FALSE}
+#Considering variables of initial interest
+vars<-c("age","sex_birth","gender_male","gender_female","gender_transm","gender_transf","gender_queer","gender_selfid","gender_nonbin","gender_prefnoresp","race_black","race_ainaan","race_asian","race_his","race_pi","race_mides","race_white","race_other","international","fincur","finpast","activ_ac","activ_athv","activ_athc","activ_athi","activ_cs","activ_cu","activ_da","activ_fs","activ_gs","activ_gov","activ_hw","activ_mp","activ_md","activ_rel","activ_soc","activ_art","activ_hon","activ_advoc","activ_other","activ_none","residenc","lonely","belong1","exerc_range4","brs_1","brs_2","brs_3","brs_4","brs_5","brs_6","sleep_wknight","sleep_wkend","gr_a","gr_b","gr_c","gr_d","gr_f","gr_none","gr_dk")
+
+targetvars <- c("flourish","peer2_3")
+
+all_cols<-c(vars,targetvars)
+data1<-data %>% 
+  select(all_cols)
+```
+
+
+
+```{r echo=FALSE}
+#Now, converting multiple binary variables to categorical variables for better representation and easier modelling.
+gender_columns <- c("gender_male", "gender_female", "gender_transm", "gender_transf", 
+                    "gender_queer", "gender_selfid", "gender_nonbin", "gender_prefnoresp")
+
+race_columns <- c("race_black", "race_ainaan", "race_asian", "race_his", "race_pi", "race_mides", 
+                  "race_white", "race_other")
+
+activity_columns <- grep("^activ_", names(data1), value = TRUE)
+activity_columns <- setdiff(activity_columns, "activ_none")
+
+#for gender
+data1$gender_category <- apply(data1[gender_columns], 1, function(row) {
+  if (!is.na(row["gender_male"]) && row["gender_male"] == 1 && all(is.na(row[-which(names(row) == "gender_male")]))) {
+    return("male")
+  } else if (!is.na(row["gender_female"]) && row["gender_female"] == 1 && all(is.na(row[-which(names(row) == "gender_female")]))) {
+    return("female")
+  } else if (all(is.na(row))) {
+    return(NA) 
+  } else {
+    return("minority_gender")
+  }
+})
+
+#for race
+data1$race_category <- apply(data1[race_columns], 1, function(row) {
+  selected_races <- names(row)[which(row == 1)]
+  if (length(selected_races) == 1) {
+    return(selected_races)  # Single race category
+  } else if (length(selected_races) > 1) {
+    return("mixed_race")    # Multiple races selected
+  } else {
+    return(NA)              # No response
+  }
+})
+
+
+# for activity participation
+data1$activity_category <- pmap_chr(data1, function(...) {
+  row <- list(...)
+  if (!is.na(row[["activ_none"]]) && row[["activ_none"]] == 1) {
+    "does_not_participate"
+  } else if (any(unlist(row[activity_columns]) == 1, na.rm = TRUE)) {
+    "participates"
+  } else {
+    NA
+  }
+})
+
+```
+
+
+```{r echo=FALSE}
+brs_columns <- paste0("brs_", 1:6)
+
+
+data1$brs_total <- rowSums(data1[brs_columns], na.rm = TRUE)
+answered_count <- rowSums(!is.na(data1[, brs_columns])) 
+
+data1$brs_total <- ifelse(answered_count > 0, data1$brs_total / answered_count, NA)
+
+
+breaks <- c(0, 2.99, 4.30, 5.00)
+labels <- c("Low resilience", "Normal resilience", "High resilience")
+
+#for BRS 
+data1$resilience_category <- cut(data1$brs_total, breaks = breaks, labels = labels, right = TRUE, include.lowest = TRUE)
+
+grade_columns <- c("gr_a", "gr_b", "gr_c", "gr_d", "gr_none", "gr_dk")
+
+#for grade
+
+data1$grade_category <- apply(data1[,grade_columns], 1, function(row) {
+  if (!is.na(row["gr_none"]) && row["gr_none"] == 1) {
+    "None"  
+  } else if (!is.na(row["gr_dk"]) && row["gr_dk"] == 1) {
+    "Don't Know"  
+  } else if (any(row[c("gr_a", "gr_b", "gr_c", "gr_d")] == 1, na.rm = TRUE)) {
+    
+    if (!is.na(row["gr_a"]) && row["gr_a"] == 1) {
+      "Grade A"
+    } else if (!is.na(row["gr_b"]) && row["gr_b"] == 1) {
+      "Grade B"
+    } else if (!is.na(row["gr_c"]) && row["gr_c"] == 1) {
+      "Grade C"
+    } else if (!is.na(row["gr_d"]) && row["gr_d"] == 1) {
+      "Grade D"
+    } else {
+      NA  
+    }
+  } else {
+    NA  
+  }
+})
+
+```
+
+
+```{r echo=FALSE}
+#checking newly created variables to examine
+# summary(as.factor(data1$gender_category))
+# summary(as.factor(data1$race_category))
+# summary(as.factor(data1$activity_category))
+# summary(as.factor(data1$resilience_category))
+# summary(as.factor(data1$grade_category))
+```
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+#examining treatment and outcome variable
+summary(as.factor(data1$international))
+summary(data1$flourish)
+```
+
+```{r echo=FALSE}
+#final data and variables
+finalvars<-c("age","sex_birth","international","fincur","finpast","residenc","lonely","belong1","exerc_range4","sleep_wknight","sleep_wkend","gender_category","race_category","activity_category","resilience_category","grade_category","flourish")
+
+finaldata<-data1 %>% 
+  select(all_of(finalvars))
+```
+
+```{r echo=FALSE}
+#based on type of variable
+cat_vars<-c("sex_birth","international","fincur","finpast","residenc","lonely","belong1","exerc_range4","sleep_wknight","sleep_wkend","gender_category","race_category","activity_category","resilience_category","grade_category")
+
+qt_vars<-c("age","flourish")
+```
+
+```{r echo=FALSE}
+#Renaming variable levels for better readability
+convert_to_factor <- function(data, var_name, levels) {
+  data[[var_name]] <- as.factor(data[[var_name]])
+  levels(data[[var_name]]) <- levels
+  return(data)
+}
+
+variables_levels <- list(
+  sex_birth = c("Female", "Male", "InterSex"),
+  international = c("Not an International Student", "Is an International Student"),
+  fincur = c("Always stressed about finance situation","Often Stressful","Sometimes stressful","Rarely stessful","Never stressful"),
+  finpast = c("Always stressed about finance situation","Often Stressful","Sometimes stressful","Rarely stessful","Never stressful"),
+  residenc= c("Residence Hall on campus","Apartment on campus","Fraternity or Sorority","On or off campus co-op housing","off campus non uni housing","off campus with guardian/parents/relatives","other"),
+lonely=c("No","Yes"),
+belong1 = c("Strongly agree","Agree that I see myself as part of campus community","Somewhat Agree","Somewhat Disagree","Disagree","Strongly Disagree"),
+exerc_range4 = c("Less than 1 hour","2-3 hrs on avg per week in past 30 days","3-4 hrs","5 or more hours"),
+sleep_wknight = c("Less than 1 hour","2-3 hrs during school year on a weeknight","3-4 hrs","5 or more hrs","1-2 hrs"),
+sleep_wkend = c("Less than 1 hour","2-3 hrs during school year on a weekend","3-4 hrs","5 or more hrs","1-2 hrs"),
+gender_category = c("Female","Male","Gender Minority"),
+race_category = c("Multiple Races","American Indian or Alaskan Native","Asian American/ Asian","African American/Black","Hispanic/Latin(x)","Middle Eastern or Arab or Arab American","Other","Native Hawaiian or Pacific Islander","White"),
+activity_category = c("Does not participate in any activity on campus","Participates")
+)
+
+for (var in names(variables_levels)) {
+  finaldata <- convert_to_factor(finaldata, var, variables_levels[[var]])
+}
+
+finaldata$resilience_category<-as.factor(finaldata$resilience_category)
+finaldata$grade_category<-as.factor(finaldata$grade_category)
+
+```
+
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+t1<-CreateTableOne(vars=finalvars,data=finaldata,factorVars = cat_vars,strata="international")
+print(t1,nonnormal=qt_vars,showAllLevels=TRUE,smd=TRUE)
+```
+```{r echo=FALSE,message=FALSE,results='hide'}
+colSums(is.na(finaldata))
+```
+```{r echo=FALSE}
+#excluding these due to huge NAs and at this point, changing the intervention variable to international
+findata<-finaldata %>% 
+  select(!c("exerc_range4","resilience_category"))
+```
+
+```{r echo=FALSE,results='hide'}
+colSums(is.na(findata))
+```
+
+```{r echo=FALSE, results='hide'}
+#Before imputation,finding unadjusted ATE,standard error and 95% CI
+
+#finaldata$fr_support<-as.factor(finaldata$fr_support)
+findata$international<-as.factor(findata$international)
+m1<-lm(flourish~international,data=findata)
+summary(m1)
+ate <- coef(m1)["internationalIs an International Student"] 
+std_error <- summary(m1)$coefficients["internationalIs an International Student","Std. Error"]
+confint(m1)
+
+lower_ci <- ate - 1.96 * std_error
+upper_ci <- ate + 1.96 * std_error
+
+cat("Unadjusted ATE:", ate, "\n")
+cat("Standard Error:", std_error, "\n")
+cat("95% CI:", lower_ci, "to", upper_ci, "\n")
+```
+
+
+
+```{r echo=FALSE,results='hide'}
+#Imputing all the categorical variables {i.e all the variables in the final dataset except our intervention and outcome variables}
+mode_value <- function(x) {
+    if (is.factor(x)) {
+        levels(x)[which.max(tabulate(match(x, levels(x))))]
+    } else {
+        ux <- unique(x)
+        ux[which.max(tabulate(match(x, ux)))]
+    }
+}
+
+cat_vars<-setdiff(cat_vars,c("exerc_range4","resilience_category"))
+for(col in cat_vars){
+  findata[[col]][is.na(findata[[col]])]<-mode_value(findata[[col]])
+}
+
+findata[["flourish"]][is.na(findata[["flourish"]])] <- median(findata[["flourish"]], na.rm = TRUE)
+
+```
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+colSums(is.na(findata))
+```
+
+```{r echo=FALSE,results='hide'}
+#After imputing the data
+#finding unadjusted ATE,standard error and 95% CI
+
+m1<-lm(flourish~international,data=findata)
+#summary(m1)
+ate1 <- coef(m1)["internationalIs an International Student"] 
+std_error <- summary(m1)$coefficients["internationalIs an International Student", "Std. Error"]
+confint(m1)
+
+lower_ci <- ate1 - 1.96 * std_error
+upper_ci <- ate1 + 1.96 * std_error
+
+CI_unadj<-ate1+c(-1,1)*1.96*std_error
+
+cat("Unadjusted ATE:", ate1, "\n")
+cat("Standard Error:", std_error, "\n")
+cat("95% CI:", lower_ci, "to", upper_ci, "\n")
+```
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+#table showing the covariate balance among treated vs control
+finalvars<-setdiff(finalvars,c("exerc_range4","resilience_category"))
+t2<-CreateTableOne(vars=finalvars,data=findata,factorVars = cat_vars,strata="international")
+tab_unweight<-print(t2,nonnormal=qt_vars,showAllLevels=TRUE,smd=TRUE)
+tab_unweight
+```
+# Table with balance between covariates for the two groups[TABLE1]
+```{r echo=FALSE}
+knitr::kable(tab_unweight)
+```
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+#looking at final dataset
+summary(findata)
+```
+
+```{r echo=FALSE}
+mod_reg <- glm(flourish ~ international*(age+ sex_birth + fincur + finpast + residenc + lonely +
+    belong1 + sleep_wknight + sleep_wkend + gender_category +
+    race_category + activity_category + grade_category),
+  data = findata,family="gaussian"
+)
+
+
+data_trt<-data_ctr<-findata
+
+data_trt$international="Is an International Student"
+data_ctr$international="Not an International Student"
+
+pred1<-predict(mod_reg,newdata=data_trt,type="response")
+pred0<-predict(mod_reg,newdata=data_ctr,type="response")
+
+ATE_reg<-mean(pred1-pred0)
+```
+
+
+
+```{r warning=FALSE,echo=FALSE,message=FALSE,results='hide'}
+#bootstrap for regression adjustment
+set.seed(1101985)
+B <- 100
+ATE.boot <- NULL
+n <- nrow(findata)
+for(i in 1:B) {
+  findata.boot <- findata[sample(1:n, n, replace = TRUE), ]
+
+m1.boot<- glm(flourish ~ international*(age+ sex_birth  + fincur + finpast + residenc + lonely +
+    belong1 + sleep_wknight + sleep_wkend + gender_category +
+    race_category + activity_category + grade_category), data = findata.boot, 
+    family = "gaussian")
+  data_trt.boot <- findata.boot
+  data_trt.boot$international = "Is an International Student"
+  data_ctr.boot <- findata.boot
+  data_ctr.boot$international = "Not an International Student"
+  pred1.boot <- predict(m1.boot, newdata = data_trt.boot, 
+    type = "response")
+  pred0.boot <- predict(m1.boot, newdata = data_ctr.boot, 
+    type = "response")
+  ATE.boot <- c(ATE.boot, mean(pred1.boot - pred0.boot))
+}
+
+SE <- sd(ATE.boot) 
+
+CI_reg <- ATE_reg + c(-1, 1)*qnorm(0.975)*SE
+
+output<-data.frame(
+  Variable=c("ATE","SE","CI_upper","CI_lower"),
+  Values = c(ATE_reg,SE,CI_reg)
+)
+
+kable(output,caption="ATE using Regression Adjustment")
+
+```
+```{r warning=FALSE,echo=FALSE,message=FALSE,results='hide'}
+#propensity score Regression Adjustment
+library(rms)
+p1<-glm(international~age+ sex_birth  + fincur + finpast + residenc + lonely +
+    belong1 + sleep_wknight + sleep_wkend + gender_category +
+    race_category + activity_category + grade_category, data = findata, 
+    family = "binomial")
+
+findata$ps<-predict(p1,type="response")
+m1.ps<-glm(flourish~international*rcs(ps,5),data=findata,family="gaussian")
+
+data_trt<-data_ctr<-findata
+
+data_trt$international="Is an International Student"
+data_ctr$international="Not an International Student"
+
+pred1<-predict(m1.ps,newdata=data_trt,type="response")
+pred0<-predict(m1.ps,newdata=data_ctr,type="response")
+
+ATE_ps<-mean(pred1-pred0)
+```
+```{r echo=FALSE,message=FALSE,results='hide'}
+#bootstrap for ps reg
+
+set.seed(1101985)
+B <- 100
+ATE.boot <- NULL
+n <- nrow(findata)
+for(i in 1:B) {
+  findata.boot <- findata[sample(1:n, n, replace = TRUE), ]
+m1.ps.boot<-glm(flourish~international*rcs(ps,5),data=findata.boot,family="gaussian")
+
+  data_trt.boot <- findata.boot
+  data_trt.boot$international = "Is an International Student"
+  data_ctr.boot <- findata.boot
+  data_ctr.boot$international = "Not an International Student"
+  pred1.boot <- predict(m1.ps.boot, newdata = data_trt.boot, 
+    type = "response")
+  pred0.boot <- predict(m1.ps.boot, newdata = data_ctr.boot, 
+    type = "response")
+  ATE.boot <- c(ATE.boot, mean(pred1.boot - pred0.boot))
+}
+
+SE <- sd(ATE.boot) 
+
+CI_ps <- ATE_ps + c(-1, 1)*qnorm(0.975)*SE
+
+output<-data.frame(
+  Variable=c("ATE","SE","CI_upper","CI_lower"),
+  Values = c(ATE_ps,SE,CI_ps)
+)
+
+kable(output,caption="ATE using PS Regression Adjustment")
+
+```
+```{r warning=FALSE,echo=FALSE,message=FALSE,results='hide'}
+#Propensity Score Stratification
+ps<-predict(p1,type="response")
+ps_quintile <- cut(ps, 
+	breaks = c(0, quantile(ps, p = c(0.2, 0.4, 0.6, 0.8)), 1), labels = 1:5)
+table(ps_quintile, findata$international)
+
+n<-nrow(findata)
+nj<-table(ps_quintile)
+te_quintile <- tapply(findata$flourish[findata$international == "Is an International Student"], ps_quintile[findata$international == "Is an International Student"], mean) -
+	tapply(findata$flourish[findata$international == "Not an International Student"], ps_quintile[findata$international == "Not an International Student"], mean)
+print(round(te_quintile, 3))
+ATE_PSS <- sum(te_quintile *nj/n)
+print(round(ATE_PSS, 3))
+```
+```{r echo=FALSE,message=FALSE,results='hide'}
+#bootstrap for PSS
+
+set.seed(1101985)
+B <- 100
+ATE_PSS.boot <- NULL
+n <- nrow(findata)
+for(i in 1:B) {
+  findata.boot <- findata[sample(1:n, n, replace = TRUE), ]
+  p1.boot<-glm(international~age+ sex_birth  + fincur + finpast + residenc + lonely +
+    belong1 + sleep_wknight + sleep_wkend + gender_category +
+    race_category + activity_category + grade_category, data = findata.boot, 
+    family = "binomial")
+  ps.boot<-predict(p1.boot,type="response")
+ps_quintile.boot <- cut(ps.boot, 
+	breaks = c(0, quantile(ps.boot, p = c(0.2, 0.4, 0.6, 0.8)), 1), labels = 1:5)
+nj.boot<-table(ps_quintile.boot)
+te_quintile.boot <- tapply(findata.boot$flourish[findata.boot$international == "Is an International Student"], ps_quintile.boot[findata.boot$international == "Is an International Student"], mean) -
+	tapply(findata.boot$flourish[findata.boot$international == "Not an International Student"], ps_quintile.boot[findata.boot$international == "Not an International Student"], mean)
+	ATE.boot <- sum(te_quintile.boot *nj.boot/n)
+ATE_PSS.boot <- c(ATE_PSS.boot, ATE.boot)
+}
+
+SE <- sd(ATE_PSS.boot) 
+
+CI_PSS<- ATE_PSS + c(-1, 1)*qnorm(0.975)*SE
+
+output<-data.frame(
+  Variable=c("ATE","SE","CI_upper","CI_lower"),
+  Values = c(ATE_PSS,SE,CI_PSS)
+)
+
+kable(output,caption="ATE using Propensity Score Stratification")
+
+```
+
+
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+#Now, doing IPW as sensitivity analysis
+findata$international_numeric <- ifelse(findata$international == "Is an International Student", 1, 0)
+
+findata$weight<-findata$international_numeric/ps + (1-findata$international_numeric)/(1-ps)
+
+
+finSvy <- svydesign(ids = ~ 1, data = findata, weights = ~ weight)
+
+tabWeighted <- svyCreateTableOne(vars = finalvars, strata = "international",
+  data = finSvy, test = FALSE)
+t_weight <- print(tabWeighted,nonnormal=qt_vars, smd = TRUE, showAllLevels = TRUE, varLabels = TRUE)
+
+```
+# Weighted Table of covariates balance between the groups [TABLE2]
+```{r echo=FALSE}
+#weighted table of the covariates across the groups
+knitr::kable(t_weight)
+```
+# Plot of SMD between weighted and unweighted
+```{r, echo = FALSE, size="tiny",warning=FALSE,message=FALSE}
+
+library(reshape2)
+library(ggplot2)
+library(Matching)
+dataPlot <- data.frame(variable  = rownames(ExtractSmd(t2)),
+	Unweighted = as.numeric(ExtractSmd(t2)),
+	Weighted_logit  = as.numeric(ExtractSmd(tabWeighted)))
+dataPlot <- dplyr::filter(dataPlot, 
+                          variable != c("flourish"))
+
+## Create long-format data for ggplot2
+dataPlotMelt <- melt(data          = dataPlot,
+	id.vars       = c("variable"),
+	variable.name = "Method",
+	value.name    = "SMD")
+
+## Order variable names by magnitude of SMD
+varNames <- as.character(dataPlot$variable)[order(dataPlot$Unweighted)]
+
+## Order factor levels in the same order
+dataPlotMelt$variable <- factor(dataPlotMelt$variable,
+	levels = varNames)
+
+## Plot using ggplot2
+ggplot(data = dataPlotMelt,
+	mapping = aes(x = variable, y = SMD, group = Method, color = Method)) +
+	geom_line() +
+	geom_point() +
+	geom_hline(yintercept = 0.1, color = "black", size = 0.1) +
+	coord_flip() +
+	theme_bw() + theme(legend.key = element_blank())
+```
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+#IPW
+ps<-predict(p1,type="response")
+
+w1<-findata$international_numeric/ps
+w2<-(1-findata$international_numeric)/(1-ps)
+
+ATE_IPW<-mean(findata$flourish*w1)-mean(findata$flourish*w2)
+
+print(ATE_IPW)
+
+ATE_IPW2 <- weighted.mean(findata$flourish, w1) - 
+	weighted.mean(findata$flourish, w2)
+print(ATE_IPW2, digits = 3)
+```
+
+```{r echo=FALSE}
+#bootstrapping for ipw
+
+set.seed(1101985)
+B <- 100
+ATE_IPW.boot <- NULL
+ATE_IPW2.boot<-NULL
+n <- nrow(findata)
+for(i in 1:B) {
+  findata.boot <- findata[sample(1:n, n, replace = TRUE), ]
+  findata.boot$international_num<-ifelse(findata.boot$international == "Is an International Student", 1, 0)
+  p1.boot<-glm(international~age+ sex_birth  + fincur + finpast + residenc + lonely +
+    belong1 + sleep_wknight + sleep_wkend + gender_category +
+    race_category + activity_category + grade_category, data = findata.boot, 
+    family = "binomial")
+  ps.boot<-predict(p1.boot,type="response")
+  w1.boot<-findata.boot$international_num/ps.boot
+  w2.boot<-(1-findata.boot$international_num)/(1-ps.boot)
+  ATE_1.boot<-c(mean(findata.boot$flourish*w1.boot)-mean(findata.boot$flourish*w2.boot))
+  ATE_2.boot<-c(weighted.mean(findata.boot$flourish,w1.boot)-weighted.mean(findata.boot$flourish,w2.boot))
+  
+  ATE_IPW.boot<-c(ATE_IPW.boot,ATE_1.boot)
+  ATE_IPW2.boot<-c(ATE_IPW2.boot,ATE_2.boot)
+}
+
+SE_IPW<-sd(ATE_IPW.boot)
+SE_IPW2<-sd(ATE_IPW2.boot)
+
+CI_IPW <- ATE_IPW + c(-1, 1)*qnorm(0.975)*SE_IPW
+CI_IPW2 <- ATE_IPW2 + c(-1, 1)*qnorm(0.975)*SE_IPW2
+
+
+```
+
+# ATE for different methods[TABLE3]
+```{r echo=FALSE}
+Ate_vec<- c(ate1,ATE_reg,ATE_ps,ATE_PSS)
+
+result<-data.frame(
+  Method=c("Unadjusted","Regression Adjustment","PS regression","Propensity Score Stratification"),
+  ATE=Ate_vec,
+   CI_lower = c(CI_unadj[1], CI_reg[1], CI_ps[1], CI_PSS[1]),
+  CI_upper = c(CI_unadj[2], CI_reg[2], CI_ps[2], CI_PSS[2])
+)
+
+kable(result,caption="Average Treatment Effect for various methods")
+```
+
+```{r echo=FALSE,results='hide'}
+#Getting a closer look at the observations with extremely high weights
+findata %>% 
+  filter(weight>50) %>% 
+  head(10)
+
+
+```
+# Forest Plot of ATE for the analysis vs Sensitivity Analysis
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#excluding IPW1 because of outliers, trying to find out the root cause
+#now observing the ATEs and making plot
+
+ATE_vector<-c(ate1,ATE_reg,ATE_ps,ATE_PSS,ATE_IPW2)
+CI_matrix<-rbind(CI_unadj,CI_reg,CI_ps,CI_PSS,CI_IPW2)
+
+tabletext<- cbind(c("Method", "Unadjusted", "Regression", "PS Reg", "PSS", "IPW2"),
+	c("ATE", round(ATE_vector, digits = 3)))
+
+results <- 
+  structure(list(
+    mean  = c(NA, ATE_vector), 
+    lower = c(NA, CI_matrix[, 1]),
+    upper = c(NA, CI_matrix[, 2])),
+    .Names = c("mean", "lower", "upper"), 
+    row.names = c(NA, -7L), 
+    class = "data.frame")
+  	
+forestplot(tabletext, 
+           results, new_page = TRUE,
+           col=fpColors(box="royalblue",line="darkblue", summary="royalblue"))
+```
+
+**Results**
+
+The outcome of interest is flourishing which is a continous scale used to determine the mental well being and the covariates chosen in this analysis were based on prior research in this field. However, due to the structure of the dataset and for the sake of the application of the intended models, imputation was done{mode for factorial variables and median for continous variables} and some variables were dropped due to large missing values. The distribution of the covariates across the treatment variable, whether a student is international or not can be seen in the table[TABLE1]. The unadjusted ATE with 95% CI was found out to be -0.0805(-0.313,0.152). Then, ATE was estimated using regression adjustment, Propensity Score Regression and Propensity Score Stratification. The respective ATEs and CIs can be seen in the table[TABLE3].There does not seem to be a statistically significant association between the outcome of interest and the dependent variable. I then proceeded to perform weighting as the treatment variable is extremely skewed and the covariate balance for weighted groups can be seen in the table[TABLE2]. As sensitivity analysis, Inverse Probability Weighting was done and IPW1,IPW2 was used to compare the existing results.IPW1 is giving unexpected results. Also,to the naked eye there seems to be no outliers in the examined rows with large weight assignment. Hence IPW1 ATE needs to be looked at closely and should be understood why it is different.All the ATEs and respective CIs along with the IPW2 can be seen in this forestplot.
+
+**Discussion**
+
+Based on the ATEs from various methods and their respective Confidence Intervals, it looks like there is no significant association between change in flourishing and whether a student is an international student or not. This observation is something unexpected as the public consensus is that being an international student could be one of the factors contributing to relatively negative mental well being in the institutions. This can be due to a lack of essential covariates in the data considered of it could be due to just there not being enough data for the international students as opposed to non international students. However, in the sensitivity analysis, using IPW2 gives a negative association{thought the confidence interval has 0 as well} while IPW1 is showing a higher positive association which needs to be further examined to understand. A limitation of the study lies in the dataset where the surveys sent to students were randomized however there is no proper information on the population who actually completed the surveys. Further analysis should be done, maybe considering data from various years and observe if the effect remains similar. Moreover, as with all causal techniques observed over the course, we assume no unmeasured confounding which is a limitation of this study because it is hard to fact check this assumption. An interesting extension would be to maybe cluster by region and observe if there is any pattern based on the location of the university.
+
+**References**
+
+1. Wielemaker AN. Factors predicting flourishing in college students: Community engagement and belonging mediating the relationship between loneliness and flourishing. [Order No. 29260746]. Biola University; 2022.  
+2. Diener, E., Wirtz, D., Tov, W. et al. New Well-being Measures: Short Scales to Assess Flourishing and Positive and Negative Feelings. Soc Indic Res 97, 143–156 (2010). https://doi.org/10.1007/s11205-009-9493-y  
+3. Ryff, C. D., & Keyes, C. L. M. (1995). The structure of psychological well-being revisited. Journal of Personality and Social Psychology, 69(4), 719–727. https://doi.org/10.1037/0022-3514.69.4.719  
+4. PUBH 7485 coursework and HW solutions, https://canvas.umn.edu/courses/462641  
+5. ALL the statistical methods used were referred from the classwork and hence I am not citing them specifically.  
